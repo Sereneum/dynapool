@@ -1,4 +1,4 @@
-package dynopool
+package dynapool
 
 import (
 	"context"
@@ -29,6 +29,14 @@ type WorkerPool struct {
 type worker struct {
 	id   int
 	stop chan struct{}
+
+	stopOnce sync.Once
+}
+
+func (w *worker) stopWorker() {
+	w.stopOnce.Do(func() {
+		close(w.stop)
+	})
 }
 
 // NewWorkerPool создает новый пул воркеров
@@ -37,8 +45,8 @@ func NewWorkerPool(bufferSize int) *WorkerPool {
 
 	pool := &WorkerPool{
 		jobs:         make(chan string, bufferSize),
-		addWorker:    make(chan struct{}),
-		removeWorker: make(chan struct{}),
+		addWorker:    make(chan struct{}, 1),
+		removeWorker: make(chan struct{}, 1),
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -65,11 +73,16 @@ func (p *WorkerPool) Submit(job string) error {
 func (p *WorkerPool) Shutdown() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.isShutdown.Swap(true) {
+
+	if !p.isShutdown.CompareAndSwap(false, true) {
 		return
 	}
 
 	p.cancel()
+	for _, w := range p.workers {
+		w.stopWorker()
+	}
+	p.workers = nil
 	close(p.jobs)
 	p.wg.Wait()
 }
@@ -80,7 +93,10 @@ func (p *WorkerPool) AddWorker() {
 		return
 	}
 
-	p.addWorker <- struct{}{}
+	select {
+	case p.addWorker <- struct{}{}:
+	case <-p.ctx.Done():
+	}
 }
 
 func (p *WorkerPool) RemoveWorker() {
@@ -88,7 +104,10 @@ func (p *WorkerPool) RemoveWorker() {
 		return
 	}
 
-	p.removeWorker <- struct{}{}
+	select {
+	case p.removeWorker <- struct{}{}:
+	case <-p.ctx.Done():
+	}
 }
 
 // runManager управляет жизненным циклом воркеров
@@ -130,7 +149,7 @@ func (p *WorkerPool) stopWorker() {
 	lastIdx := len(p.workers) - 1
 	w := p.workers[lastIdx]
 	p.workers = p.workers[:lastIdx]
-	close(w.stop)
+	w.stopWorker()
 }
 
 func (p *WorkerPool) workerLoop(w *worker) {

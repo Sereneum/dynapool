@@ -1,14 +1,14 @@
 package main
 
 import (
-	dynopool "dynapool"
+	"dynapool"
 	"fmt"
 	"sync"
 	"time"
 )
 
 func main() {
-	pool := dynopool.NewWorkerPool(32)
+	pool := dynapool.NewWorkerPool(32)
 
 	// Запускаем 5 воркеров
 	for i := 0; i < 5; i++ {

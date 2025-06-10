@@ -1,4 +1,4 @@
-package dynopool
+package dynapool
 
 import (
 	"fmt"
